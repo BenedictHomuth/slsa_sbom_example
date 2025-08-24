@@ -1,0 +1,63 @@
+name: Build Container with SLSA + SBOM
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write     # Required for SLSA signing
+  attestations: write
+  packages: write     # Required for pushing to GHCR
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}/slsa_example:latest
+
+      - name: Generate SBOM for container
+        uses: anchore/syft@v1
+        with:
+          source: ghcr.io/${{ github.repository }}/app:latest
+          output: cyclonedx-json=sbom.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+
+      - name: Generate SLSA Provenance for container
+        uses: slsa-framework/slsa-github-generator/.github/actions/generator@v2
+        with:
+          artifact_path: ghcr.io/${{ github.repository }}/app:latest
+          artifact_type: container
+
+      - name: Upload Provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance
+          path: provenance.json
